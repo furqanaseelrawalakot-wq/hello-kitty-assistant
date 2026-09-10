@@ -34,7 +34,7 @@ MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "gemini").strip().lower()
 
 # Gemini Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 
 # Weather & Location Configuration
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "").strip()
