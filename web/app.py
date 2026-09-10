@@ -9,9 +9,12 @@ import sys
 import time
 import tempfile
 import subprocess
-import traceback
+import mimetypes
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
+
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("application/javascript", ".js")
 
 # Ensure immediate unbuffered terminal output on Windows
 try:
@@ -83,19 +86,6 @@ def get_local_ip() -> str:
 chat_history = []
 
 
-@app.route("/test-env")
-def test_env():
-    info = {
-        "PATH_INFO": request.environ.get("PATH_INFO"),
-        "RAW_URI": request.environ.get("RAW_URI"),
-        "REQUEST_URI": request.environ.get("REQUEST_URI"),
-        "HTTP_X_FORWARDED_URI": request.environ.get("HTTP_X_FORWARDED_URI"),
-        "HTTP_X_MATCHED_PATH": request.environ.get("HTTP_X_MATCHED_PATH"),
-        "headers": {k: v for k, v in request.headers.items()}
-    }
-    return jsonify(info)
-
-
 @app.route("/")
 @app.route("/api")
 @app.route("/api/index")
@@ -112,6 +102,22 @@ def index():
         local_ip=local_ip,
         protocol="https" if use_https else "http"
     )
+
+
+@app.route("/static/<path:filename>")
+def serve_static(filename):
+    """Explicitly serves static files with strict correct MIME types for cloud deployment."""
+    static_dirs = [
+        Path(__file__).parent / "static",
+        PROJECT_ROOT / "public" / "static",
+        PROJECT_ROOT / "static"
+    ]
+    for s_dir in static_dirs:
+        target = s_dir / filename
+        if target.exists():
+            mime = "text/css" if filename.endswith(".css") else ("application/javascript" if filename.endswith(".js") else None)
+            return send_from_directory(str(s_dir), filename, mimetype=mime)
+    return "File not found", 404
 
 
 @app.route("/chat", methods=["POST"])
