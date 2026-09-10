@@ -196,19 +196,38 @@ def extract_weather_request(text: str) -> Tuple[bool, Optional[str]]:
         "what's the weather", "what is the weather", "how's the weather", "how is the weather",
         "weather today", "weather outside", "weather forecast", "tell me the weather",
         "is it going to rain", "is it raining", "will it rain", "rain today",
-        "how hot is it", "how cold is it", "temperature outside", "temperature today"
+        "how hot is it", "how cold is it", "temperature outside", "temperature today",
+        "check weather", "show weather", "weather report", "tell weather", "give me weather"
     ]
 
-    is_weather = any(trig in clean for trig in weather_triggers) or clean.startswith("weather in ") or clean.startswith("weather for ")
+    is_weather = (
+        clean in ["weather", "the weather", "climate", "map and climate", "weather map"] or
+        any(trig in clean for trig in weather_triggers) or
+        clean.startswith("weather in ") or
+        clean.startswith("weather for ") or
+        clean.startswith("weather of ") or
+        clean.endswith(" weather") or
+        " weather in " in clean or
+        " weather for " in clean or
+        " weather of " in clean
+    )
     if not is_weather:
         return False, None
 
-    # Extract city if explicitly mentioned
-    match = re.search(r'(?:in|for|at|of)\s+([a-zA-Z\s]+)', clean)
+    # Extract city if explicitly mentioned via \b(in|for|at|of)\b
+    match = re.search(r'\b(?:in|for|at|of)\b\s+([a-zA-Z\s]+)', clean)
     if match:
         city = match.group(1).strip()
-        city = re.sub(r'\b(today|outside|now|currently|please|like|is|the|tomorrow|this morning|this afternoon)\b', '', city).strip()
-        if city and len(city) > 1:
+        city = re.sub(r'\b(today|outside|now|currently|please|like|is|the|tomorrow|this morning|this afternoon|weather|climate)\b', '', city).strip()
+        if city and len(city) > 1 and city not in ["weather", "climate", "forecast"]:
+            return True, city
+
+    # Extract city from "[city] weather", e.g. "tokyo weather", "london weather"
+    match_city_weather = re.search(r'^([a-zA-Z\s]+)\s+weather\b', clean)
+    if match_city_weather:
+        city = match_city_weather.group(1).strip()
+        city = re.sub(r'\b(what is|what\'s|how is|how\'s|check|show|tell|me|the|today|give|current)\b', '', city).strip()
+        if city and len(city) > 1 and city not in ["what", "how", "the", "check", "show", "tell", "weather"]:
             return True, city
 
     return True, None
@@ -330,30 +349,25 @@ def handle_feature(user_command: str) -> Tuple[bool, str]:
             clear_pending_action()
             spoken, _ = get_climate_and_map(location)
             return True, spoken
-        elif DEFAULT_CITY:
-            clear_pending_action()
-            spoken, _ = get_climate_and_map(DEFAULT_CITY)
-            return True, spoken
         else:
-            PENDING_ACTION = "WAITING_FOR_MAP_LOCATION"
-            return True, "Which city, region, or country would you like to see on Google Maps and check the climate for?"
+            target = DEFAULT_CITY or "Tokyo"
+            clear_pending_action()
+            spoken, _ = get_climate_and_map(target)
+            if not DEFAULT_CITY:
+                spoken += " (Tip: You can also ask for any location worldwide, like 'map and climate of Switzerland' or 'map of Paris'!)"
+            return True, spoken
 
     # =============================================================
     # 4. GENERAL WEATHER Feature (Natural Phrasing + DEFAULT_CITY / Follow-Up)
     # =============================================================
     is_weather, city_name = extract_weather_request(text)
     if is_weather:
-        if city_name:
-            clear_pending_action()
-            spoken, _ = get_climate_and_map(city_name)
-            return True, spoken
-        elif DEFAULT_CITY:
-            clear_pending_action()
-            spoken, _ = get_climate_and_map(DEFAULT_CITY)
-            return True, spoken
-        else:
-            PENDING_ACTION = "WAITING_FOR_CITY"
-            return True, "Which city would you like the weather for?"
+        target_city = city_name or DEFAULT_CITY or "Tokyo"
+        clear_pending_action()
+        spoken, _ = get_climate_and_map(target_city)
+        if not city_name and not DEFAULT_CITY:
+            spoken += " (Tip: You can also ask for any city, like 'weather in London' or 'weather in Dubai'!)"
+        return True, spoken
 
     # =============================================================
     # 5. ALARM Feature (Natural Phrasing + Follow-Up)

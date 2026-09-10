@@ -13,6 +13,7 @@ import threading
 import traceback
 import urllib.parse
 from typing import Optional
+import requests
 import pygame
 import yt_dlp
 
@@ -142,6 +143,39 @@ def _music_worker(temp_file_path: str, title: str):
         CURRENT_SONG_TITLE = None
 
 
+def find_youtube_video(query: str) -> tuple[Optional[str], str]:
+    """
+    Lightweight, direct YouTube search scraper.
+    Extracts genuine videoId and title in < 0.5s without yt-dlp or JS runtimes.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+    url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+    try:
+        r = requests.get(url, headers=headers, timeout=6)
+        # 1. Match videoRenderer blocks for exact video ID and matching title
+        items = re.findall(r'"videoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})".*?"title":\{"runs":\[\{"text":"([^"]+)"', r.text)
+        if items:
+            vid, title = items[0]
+            return vid, title
+
+        # 2. Fallback to general videoId extraction
+        vids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', r.text)
+        seen = set()
+        unique_vids = []
+        for v in vids:
+            if v not in seen:
+                seen.add(v)
+                unique_vids.append(v)
+        if unique_vids:
+            return unique_vids[0], query.title()
+    except Exception as e:
+        print(f"[Music Search Scraper Notice]: {e}", flush=True)
+    return None, query.title()
+
+
 def play_music(song_query: str) -> str:
     """
     Searches YouTube, extracts metadata for web playback, and handles background playback.
@@ -164,34 +198,40 @@ def play_music(song_query: str) -> str:
 
     print(f"\n[Music Engine]: Searching YouTube for: \"{song_name}\"...", flush=True)
 
-    # 1. Fast metadata extraction (download=False) - takes ~1 second
-    ydl_opts_info = {
-        'format': 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'default_search': 'ytsearch1',
-        'socket_timeout': 8,
-        'retries': 2,
-    }
+    # 1. Fast direct YouTube search (retrieves real video ID and title in <0.5s)
+    v_id, v_title = find_youtube_video(song_name)
+    if v_id:
+        video_id = v_id
+        title = v_title
+        webpage_url = f"https://www.youtube.com/watch?v={video_id}"
+        embed_url = f"https://www.youtube.com/embed/{video_id}?autoplay=1&enablejsapi=1"
+    else:
+        # Fallback to yt-dlp metadata
+        ydl_opts_info = {
+            'format': 'bestaudio/best',
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+            'default_search': 'ytsearch1',
+            'socket_timeout': 8,
+            'retries': 2,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                search_results = ydl.extract_info(f"ytsearch1:{song_name}", download=False)
+                if search_results and 'entries' in search_results and search_results['entries']:
+                    entry = search_results['entries'][0]
+                    title = entry.get('title') or title
+                    video_id = entry.get('id') or ''
+                    if video_id:
+                        webpage_url = entry.get('webpage_url') or f"https://www.youtube.com/watch?v={video_id}"
+                        embed_url = f"https://www.youtube.com/embed/{video_id}?autoplay=1&enablejsapi=1"
+        except Exception as search_err:
+            print(f"[Music Engine Warning]: yt-dlp search notice: {search_err}", flush=True)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-            search_results = ydl.extract_info(f"ytsearch1:{song_name}", download=False)
-            if search_results and 'entries' in search_results and search_results['entries']:
-                entry = search_results['entries'][0]
-                title = entry.get('title') or title
-                video_id = entry.get('id') or ''
-                if video_id:
-                    webpage_url = entry.get('webpage_url') or f"https://www.youtube.com/watch?v={video_id}"
-                    embed_url = f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&enablejsapi=1"
-    except Exception as search_err:
-        print(f"[Music Engine Warning]: yt-dlp search notice: {search_err}", flush=True)
-
-    # If video_id could not be extracted (e.g. YouTube bot block on cloud datacenters),
-    # use YouTube's native search embed player which automatically finds and plays the top match!
+    # Fallback to search embed if video_id still empty
     if not embed_url:
-        embed_url = f"https://www.youtube-nocookie.com/embed?listType=search&list={urllib.parse.quote(song_name)}&autoplay=1"
+        embed_url = f"https://www.youtube.com/embed?listType=search&list={urllib.parse.quote(song_name)}&autoplay=1"
 
     CURRENT_MUSIC_METADATA = {
         "title": title,
@@ -204,38 +244,42 @@ def play_music(song_query: str) -> str:
     IS_PAUSED = False
 
     # 2. Local speaker playback (only when running locally on desktop, not in cloud serverless)
-    is_headless = os.environ.get("SDL_AUDIODRIVER") == "dummy" or os.environ.get("VERCEL")
+    is_headless = os.environ.get("SDL_AUDIODRIVER") == "dummy" or bool(os.environ.get("VERCEL")) or bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
     if not is_headless:
-        try:
-            temp_dir = tempfile.gettempdir()
-            output_template = os.path.join(temp_dir, f"kitty_music_{int(time.time())}.%(ext)s")
-            ydl_opts_dl = {
-                'format': 'bestaudio/best',
-                'outtmpl': output_template,
-                'noplaylist': True,
-                'quiet': True,
-                'no_warnings': True,
-                'socket_timeout': 15,
-                'retries': 2,
-                'max_filesize': 40 * 1024 * 1024,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
-                query = f"https://www.youtube.com/watch?v={video_id}" if video_id else f"ytsearch1:{song_name}"
-                res = ydl.extract_info(query, download=True)
-                if res:
-                    e = res['entries'][0] if 'entries' in res and res['entries'] else res
-                    act_file = ydl.prepare_filename(e)
-                    if os.path.exists(act_file):
-                        CURRENT_SONG_FILE = act_file
-                        _music_thread = threading.Thread(
-                            target=_music_worker,
-                            args=(act_file, title),
-                            name=f"MusicWorker-{int(time.time())}",
-                            daemon=True
-                        )
-                        _music_thread.start()
-        except Exception as dl_err:
-            print(f"[Music Local Playback Notice]: {dl_err}", flush=True)
+        def _bg_local_playback(vid: str, s_name: str, track_title: str):
+            global CURRENT_SONG_FILE, _music_thread
+            try:
+                temp_dir = tempfile.gettempdir()
+                output_template = os.path.join(temp_dir, f"kitty_music_{int(time.time())}.%(ext)s")
+                ydl_opts_dl = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': output_template,
+                    'noplaylist': True,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'socket_timeout': 15,
+                    'retries': 1,
+                    'max_filesize': 40 * 1024 * 1024,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
+                    query = f"https://www.youtube.com/watch?v={vid}" if vid else f"ytsearch1:{s_name}"
+                    res = ydl.extract_info(query, download=True)
+                    if res:
+                        e = res['entries'][0] if 'entries' in res and res['entries'] else res
+                        act_file = ydl.prepare_filename(e)
+                        if os.path.exists(act_file):
+                            CURRENT_SONG_FILE = act_file
+                            _music_thread = threading.Thread(
+                                target=_music_worker,
+                                args=(act_file, track_title),
+                                name=f"MusicWorker-{int(time.time())}",
+                                daemon=True
+                            )
+                            _music_thread.start()
+            except Exception as dl_err:
+                print(f"[Music Local Playback Notice]: {dl_err}", flush=True)
+
+        threading.Thread(target=_bg_local_playback, args=(video_id, song_name, title), daemon=True).start()
 
     return f"Now playing {title} on YouTube!"
 
