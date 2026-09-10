@@ -1,0 +1,28 @@
+# Hello Kitty AI Voice Assistant - Dependencies
+
+# Voice Speech-to-Text & Text-to-Speech
+SpeechRecognition>=3.10.0
+gTTS>=2.5.0
+pygame>=2.5.0
+
+# Environment Configuration
+python-dotenv>=1.0.0
+
+# LLM Providers (Google Gemini & OpenAI)
+google-generativeai>=0.8.0
+openai>=1.0.0
+
+# Utilities & Networking
+requests>=2.31.0
+
+# Web Interface & Production Server (Requirement 7)
+flask>=3.0.0
+gunicorn>=21.2.0
+
+# Music Playback (Requirement 4)
+yt-dlp>=2024.0.0
+
+# Language Support & Translation (Requirement 5)
+langdetect>=1.0.9
+deep-translator>=1.11.0
+

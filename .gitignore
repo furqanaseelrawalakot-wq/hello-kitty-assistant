@@ -1,0 +1,27 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Environment Variables & Secrets
+.env
+*.env
+
+# Python Cache & Compiled Files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# SSL Certificates
+ssl/
+
+# Temporary / OS Files
+tmp/
+temp/
+.DS_Store
+Thumbs.db
+
+# Cloudflare bin executable
+bin/

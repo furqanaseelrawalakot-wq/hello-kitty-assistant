@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#16162a">
+    <title>Hello Kitty — AI Voice Assistant</title>
+    <!-- Google Fonts for Modern Elegant Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Linked via Flask url_for with cache buster -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ cache_id }}">
+</head>
+<body>
+    <!-- =========================================================
+         PART 1 — LANDING / SPLASH SCREEN
+         ========================================================= -->
+    <div id="landing-screen" class="landing-screen" aria-label="Welcome screen">
+        <div class="landing-content">
+            <!-- Pulsing Glowing Red Bow Icon -->
+            <div class="bow-glow-container">
+                <div class="bow-icon" aria-hidden="true">🎀</div>
+            </div>
+
+            <!-- Elegant Title & Subtitle -->
+            <h1 class="landing-title">Hello Kitty</h1>
+            <p class="landing-subtitle">Your Alexa-Style AI Voice Assistant</p>
+
+            <!-- Pill Button to Transition to Chat -->
+            <button id="start-chat-btn" class="start-chat-btn" type="button" aria-label="Start Chatting">
+                <span>Start Chatting & Speaking</span>
+                <svg class="btn-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </button>
+            <button id="landing-voice-btn" class="landing-voice-btn" type="button" aria-label="Speak to Hello Kitty immediately">
+                <span>🎙️ Speak to Kitty</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         PART 2 — DARK GLASSMORPHISM CHAT & VOICE INTERFACE
+         ========================================================= -->
+    <div id="chat-container" class="chat-container chat-wrapper chat-hidden" aria-label="Chat interface">
+        <!-- HEADER (top of the chat container) -->
+        <header class="chat-header">
+            <div class="header-left">
+                <button id="back-to-landing-btn" class="back-nav-btn" type="button" title="Back to Welcome Screen" aria-label="Back">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="header-info">
+                    <div class="header-title">
+                        <span class="header-bow">🎀</span>
+                        <span>Hello Kitty</span>
+                    </div>
+                    <div class="header-status">
+                        <span class="status-dot"></span>
+                        <span>Online &bull; Gemini AI & Voice</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <!-- Mobile Phone Connect QR Modal Toggle -->
+                <button id="mobile-connect-btn" class="mobile-connect-btn" type="button" title="Open on Mobile Phone via QR Code">
+                    <span>📱</span>
+                    <span class="mobile-btn-text">Mobile</span>
+                </button>
+                <!-- Voice Output (TTS) Toggle -->
+                <button id="voice-toggle-btn" class="voice-toggle-btn active" type="button" title="Toggle Spoken Voice Output">
+                    <span id="voice-toggle-icon">🔊</span>
+                    <span id="voice-toggle-label">Voice: ON</span>
+                </button>
+                <!-- Clear Chat Button -->
+                <button id="clear-btn" class="clear-btn" type="button" title="Clear Conversation Context">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    <span>Clear</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- ACTIVE MUSIC CONTROLLER BAR (Visible when music is playing or paused) -->
+        <div id="music-controller-bar" class="music-controller-bar music-bar-hidden">
+            <div class="music-bar-left">
+                <div class="music-bar-eq">
+                    <span class="eq-mini-bar"></span>
+                    <span class="eq-mini-bar"></span>
+                    <span class="eq-mini-bar"></span>
+                </div>
+                <div class="music-bar-info">
+                    <span class="music-bar-tag">NOW PLAYING</span>
+                    <span id="music-bar-title" class="music-bar-title">Track Name</span>
+                </div>
+            </div>
+            <div class="music-bar-controls">
+                <button type="button" id="music-pause-btn" class="music-ctl-btn" title="Pause / Resume playback">
+                    <span id="music-pause-icon">⏸️</span>
+                    <span id="music-pause-label">Pause</span>
+                </button>
+                <button type="button" id="music-stop-btn" class="music-ctl-btn stop-btn" title="Stop music completely">
+                    <span>⏹️</span>
+                    <span>Stop</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- MESSAGE AREA -->
+        <main class="chat-messages" id="chat-messages">
+            <div class="message-row ai-row">
+                <div class="message-bubble ai-bubble">
+                    Hello! I am Hello Kitty, your Alexa-style AI voice assistant! Click the microphone 🎙️ below to speak to me, or type any question! I can play YouTube songs, tell the weather, sing, and answer anything you'd like!
+                </div>
+                <div class="message-timestamp">Just now</div>
+            </div>
+        </main>
+
+        <!-- QUICK SUGGESTION BUTTONS (above the input box) -->
+        <section class="quick-suggestions" aria-label="Quick suggestions">
+            <button type="button" class="suggestion-btn btn-time" onclick="sendQuickPrompt('What time is it?')">
+                <span class="btn-icon">⏰</span> What time is it?
+            </button>
+            <button type="button" class="suggestion-btn btn-date" onclick="sendQuickPrompt('What is today\'s date?')">
+                <span class="btn-icon">📅</span> Today's date
+            </button>
+            <button type="button" class="suggestion-btn btn-weather" onclick="sendQuickPrompt('What is the weather in Tokyo?')">
+                <span class="btn-icon">🌤️</span> Weather
+            </button>
+            <button type="button" class="suggestion-btn btn-map" onclick="sendQuickPrompt('Check the climate and map of Switzerland')">
+                <span class="btn-icon">🗺️</span> Map & Climate
+            </button>
+            <button type="button" class="suggestion-btn btn-alarm" onclick="sendQuickPrompt('Set an alarm for 10 seconds')">
+                <span class="btn-icon">🔔</span> Alarm
+            </button>
+            <button type="button" class="suggestion-btn btn-music" onclick="sendQuickPrompt('Play classical music on youtube')">
+                <span class="btn-icon">🎵</span> Music
+            </button>
+            <button type="button" id="quick-pause-btn" class="suggestion-btn btn-pause" onclick="sendQuickPrompt('Pause music')">
+                <span class="btn-icon">⏸️</span> Pause
+            </button>
+            <button type="button" id="quick-resume-btn" class="suggestion-btn btn-resume" onclick="sendQuickPrompt('Resume music')">
+                <span class="btn-icon">▶️</span> Resume
+            </button>
+            <button type="button" id="quick-stop-btn" class="suggestion-btn btn-stop" onclick="sendQuickPrompt('Stop music')">
+                <span class="btn-icon">⏹️</span> Stop Music
+            </button>
+            <button type="button" class="suggestion-btn btn-sing" onclick="sendQuickPrompt('Sing a song about red apples')">
+                <span class="btn-icon">🎤</span> Sing a song
+            </button>
+            <button type="button" class="suggestion-btn btn-urdu" onclick="sendQuickPrompt('آپ کا نام کیا ہے؟')">
+                <span class="btn-icon">🇵🇰</span> اردو (Urdu)
+            </button>
+        </section>
+
+        <!-- INPUT AREA (bottom of the chat container) -->
+        <footer class="chat-input-area">
+            <!-- Listening / Recording Status Banner -->
+            <div id="mic-status-banner" class="mic-status-banner mic-banner-hidden">
+                <span class="recording-pulse-dot"></span>
+                <span id="mic-status-text">Listening... Speak now!</span>
+            </div>
+
+            <form id="chat-form" class="chat-input-form">
+                <input 
+                    type="text" 
+                    id="user-input" 
+                    class="chat-text-input" 
+                    placeholder="Ask or click 🎙️ to speak to Hello Kitty..." 
+                    autocomplete="off" 
+                    required
+                >
+                <!-- Voice Language Selector (English / Urdu) -->
+                <button type="button" id="mic-lang-btn" class="mic-lang-btn" title="Toggle voice recognition language: English / اردو">
+                    <span id="mic-lang-label">🇺🇸 EN</span>
+                </button>
+                <!-- Alexa-Style Voice Recording Microphone Button -->
+                <button type="button" id="mic-btn" class="chat-mic-btn" title="Click to speak (Alexa-style voice recording)" aria-label="Record voice command">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                </button>
+                <button type="submit" id="send-btn" class="chat-send-btn" aria-label="Send message">
+                    <span>Send</span>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </form>
+        </footer>
+    </div>
+
+    <!-- =========================================================
+         PART 3 — MOBILE PHONE QR CODE & INSTRUCTIONS MODAL
+         ========================================================= -->
+    <div id="mobile-modal-backdrop" class="mobile-modal-backdrop modal-hidden"></div>
+    <div id="mobile-modal" class="mobile-modal modal-hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-modal-title">
+        <div class="mobile-modal-content">
+            <div class="mobile-modal-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-title-icon">📱</span>
+                    <h2 id="mobile-modal-title" class="modal-title">Use on Your Mobile Phone</h2>
+                </div>
+                <button type="button" id="modal-close-btn" class="modal-close-btn" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="mobile-modal-body">
+                <p class="mobile-modal-subtitle">
+                    Connect any iPhone or Android phone on the same Wi-Fi network instantly:
+                </p>
+                <div class="qr-code-wrapper">
+                    <img 
+                        id="mobile-qr-img" 
+                        class="mobile-qr-img" 
+                        src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{ protocol }}://{{ local_ip }}:5000" 
+                        alt="QR Code to open Hello Kitty on Mobile"
+                        loading="lazy"
+                    >
+                    <span class="qr-scan-badge">Scan with phone camera</span>
+                </div>
+                <div class="mobile-url-box">
+                    <input 
+                        type="text" 
+                        id="mobile-url-input" 
+                        class="mobile-url-input" 
+                        value="{{ protocol }}://{{ local_ip }}:5000" 
+                        readonly
+                    >
+                    <button type="button" id="copy-url-btn" class="copy-url-btn" title="Copy URL to clipboard">
+                        <span id="copy-url-icon">📋</span>
+                        <span id="copy-url-text">Copy</span>
+                    </button>
+                </div>
+                <div class="mobile-steps-list">
+                    <div class="mobile-step-item">
+                        <span class="step-num">1</span>
+                        <span>Ensure your phone is on the <strong>same Wi-Fi</strong> network.</span>
+                    </div>
+                    <div class="mobile-step-item">
+                        <span class="step-num">2</span>
+                        <span>Point your phone camera at the QR code, or type the URL into <strong>Safari / Chrome</strong>.</span>
+                    </div>
+                    <div class="mobile-step-item">
+                        <span class="step-num">3</span>
+                        <span>Use all features on your phone: speak via mic, stream music, check climate & maps, and Urdu voice!</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client Script with cache buster -->
+    <script src="{{ url_for('static', filename='script.js') }}?v={{ cache_id }}"></script>
+</body>
+</html>
