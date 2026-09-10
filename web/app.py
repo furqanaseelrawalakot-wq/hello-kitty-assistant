@@ -83,6 +83,19 @@ def get_local_ip() -> str:
 chat_history = []
 
 
+@app.route("/test-env")
+def test_env():
+    info = {
+        "PATH_INFO": request.environ.get("PATH_INFO"),
+        "RAW_URI": request.environ.get("RAW_URI"),
+        "REQUEST_URI": request.environ.get("REQUEST_URI"),
+        "HTTP_X_FORWARDED_URI": request.environ.get("HTTP_X_FORWARDED_URI"),
+        "HTTP_X_MATCHED_PATH": request.environ.get("HTTP_X_MATCHED_PATH"),
+        "headers": {k: v for k, v in request.headers.items()}
+    }
+    return jsonify(info)
+
+
 @app.route("/")
 @app.route("/api")
 @app.route("/api/index")
