@@ -84,6 +84,9 @@ chat_history = []
 
 
 @app.route("/")
+@app.route("/api")
+@app.route("/api/index")
+@app.route("/api/index.py")
 def index():
     """Renders the main Hello Kitty web chat interface with cache-buster timestamp and mobile URL."""
     cache_id = int(time.time())
