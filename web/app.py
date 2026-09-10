@@ -161,7 +161,7 @@ def chat():
 
             music_info = get_current_music_info()
             climate_info = get_last_climate_map_info()
-            is_music = "Now playing" in feature_reply and bool(music_info.get("file_path"))
+            is_music = "Now playing" in feature_reply and bool(music_info.get("embed_url") or music_info.get("file_path") or music_info.get("title"))
             resp_data = {
                 "reply": feature_reply,
                 "is_feature": True,
@@ -173,6 +173,8 @@ def chat():
             if is_music:
                 resp_data["music"] = {
                     "title": music_info.get("title") or "YouTube Music Track",
+                    "embed_url": music_info.get("embed_url"),
+                    "webpage_url": music_info.get("webpage_url"),
                     "stream_url": f"/music/stream?t={int(time.time() * 1000)}"
                 }
             elif "paused" in feature_reply.lower():
@@ -329,7 +331,7 @@ def voice():
 
             music_info = get_current_music_info()
             climate_info = get_last_climate_map_info()
-            is_music = "Now playing" in feature_reply and bool(music_info.get("file_path"))
+            is_music = "Now playing" in feature_reply and bool(music_info.get("embed_url") or music_info.get("file_path") or music_info.get("title"))
             resp_voice = {
                 "transcript": user_text,
                 "reply": feature_reply,
@@ -342,6 +344,8 @@ def voice():
             if is_music:
                 resp_voice["music"] = {
                     "title": music_info.get("title") or "YouTube Music Track",
+                    "embed_url": music_info.get("embed_url"),
+                    "webpage_url": music_info.get("webpage_url"),
                     "stream_url": f"/music/stream?t={int(time.time() * 1000)}"
                 }
             elif "paused" in feature_reply.lower():

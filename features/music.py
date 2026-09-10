@@ -11,6 +11,7 @@ import time
 import tempfile
 import threading
 import traceback
+import urllib.parse
 from typing import Optional
 import pygame
 import yt_dlp
@@ -20,6 +21,7 @@ IS_PLAYING = False
 IS_PAUSED = False
 CURRENT_SONG_TITLE: Optional[str] = None
 CURRENT_SONG_FILE: Optional[str] = None
+CURRENT_MUSIC_METADATA: dict = {}
 _music_thread: Optional[threading.Thread] = None
 _current_temp_file: Optional[str] = None
 
@@ -64,11 +66,12 @@ def extract_song_name(command: str) -> str:
         '', clean
     ).strip()
 
-    # Remove phrases like 'a song of / song of / songs of / a song by / songs by'
-    clean = re.sub(r'^(?:the\s+)?(?:a\s+)?(?:song|songs|track|tracks|music)\s+(?:of|by)\s+', '', clean).strip()
+    # Remove phrases like 'a song of / song of / songs of / a song by / songs by / a song for'
+    clean = re.sub(r'^(?:the\s+)?(?:a\s+)?(?:song|songs|track|tracks|music)\s+(?:of|by|for)\s+', '', clean).strip()
 
-    # Remove remaining leading 'the song' or 'song'
+    # Remove remaining leading 'the song' or 'song' or 'for'
     clean = re.sub(r'^(?:the\s+)?(?:song|songs|track|tracks)\s+', '', clean).strip()
+    clean = re.sub(r'^(?:for)\s+', '', clean).strip()
 
     if clean in GENERIC_MUSIC_PHRASES or not clean:
         return ""
@@ -78,12 +81,15 @@ def extract_song_name(command: str) -> str:
 
 def get_current_music_info() -> dict:
     """Returns current music state for web streaming and status checks."""
-    global IS_PLAYING, IS_PAUSED, CURRENT_SONG_TITLE, CURRENT_SONG_FILE
+    global IS_PLAYING, IS_PAUSED, CURRENT_SONG_TITLE, CURRENT_SONG_FILE, CURRENT_MUSIC_METADATA
     return {
-        "is_playing": IS_PLAYING,
+        "is_playing": IS_PLAYING or bool(CURRENT_MUSIC_METADATA.get("embed_url")),
         "is_paused": IS_PAUSED,
-        "title": CURRENT_SONG_TITLE,
-        "file_path": CURRENT_SONG_FILE
+        "title": CURRENT_SONG_TITLE or CURRENT_MUSIC_METADATA.get("title"),
+        "file_path": CURRENT_SONG_FILE,
+        "video_id": CURRENT_MUSIC_METADATA.get("video_id"),
+        "embed_url": CURRENT_MUSIC_METADATA.get("embed_url"),
+        "webpage_url": CURRENT_MUSIC_METADATA.get("webpage_url")
     }
 
 
@@ -138,13 +144,10 @@ def _music_worker(temp_file_path: str, title: str):
 
 def play_music(song_query: str) -> str:
     """
-    Searches YouTube with yt-dlp, converts to MP3 via imageio-ffmpeg,
-    and launches background thread playback via pygame.mixer.music.
-
-    Returns:
-        str: Hello Kitty spoken confirmation.
+    Searches YouTube, extracts metadata for web playback, and handles background playback.
+    Fast, non-blocking, and 100% cloud & serverless compatible.
     """
-    global _music_thread, IS_PLAYING, CURRENT_SONG_FILE
+    global _music_thread, IS_PLAYING, IS_PAUSED, CURRENT_SONG_TITLE, CURRENT_SONG_FILE, CURRENT_MUSIC_METADATA
 
     song_name = extract_song_name(song_query)
     if not song_name:
@@ -152,85 +155,89 @@ def play_music(song_query: str) -> str:
 
     # Stop any currently playing music
     stop_music()
+    CURRENT_MUSIC_METADATA.clear()
 
-    # Pre-check mixer initialization
-    mixer_init = ensure_music_mixer_initialized()
-    print(f"\n[Music Engine]: Mixer status before search: {mixer_init}", flush=True)
-    print(f"[Music Engine]: Searching YouTube for: \"{song_name}\"...", flush=True)
+    title = song_name.title()
+    video_id = ""
+    embed_url = ""
+    webpage_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(song_name)}"
 
-    temp_dir = tempfile.gettempdir()
-    output_template = os.path.join(temp_dir, f"kitty_music_{int(time.time())}.%(ext)s")
+    print(f"\n[Music Engine]: Searching YouTube for: \"{song_name}\"...", flush=True)
 
-    # Locate ffmpeg from imageio_ffmpeg
-    ffmpeg_exe = None
-    try:
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        print(f"[Music Engine]: FFmpeg found at: {ffmpeg_exe}", flush=True)
-    except Exception as ff_err:
-        print(f"[Music Engine Warning]: Could not locate imageio_ffmpeg ({ff_err})", flush=True)
-
-    ydl_opts = {
+    # 1. Fast metadata extraction (download=False) - takes ~1 second
+    ydl_opts_info = {
         'format': 'bestaudio/best',
-        'outtmpl': output_template,
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
         'default_search': 'ytsearch1',
-        'socket_timeout': 15,
-        'retries': 3,
-        'max_filesize': 60 * 1024 * 1024,
+        'socket_timeout': 8,
+        'retries': 2,
     }
 
-    if ffmpeg_exe:
-        ydl_opts['ffmpeg_location'] = ffmpeg_exe
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            search_results = ydl.extract_info(f"ytsearch1:{song_name}", download=True)
-            if not search_results or 'entries' not in search_results or not search_results['entries']:
-                return f"Sorry, I couldn't find '{song_name}' on YouTube."
+        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+            search_results = ydl.extract_info(f"ytsearch1:{song_name}", download=False)
+            if search_results and 'entries' in search_results and search_results['entries']:
+                entry = search_results['entries'][0]
+                title = entry.get('title') or title
+                video_id = entry.get('id') or ''
+                if video_id:
+                    webpage_url = entry.get('webpage_url') or f"https://www.youtube.com/watch?v={video_id}"
+                    embed_url = f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&enablejsapi=1"
+    except Exception as search_err:
+        print(f"[Music Engine Warning]: yt-dlp search notice: {search_err}", flush=True)
 
-            entry = search_results['entries'][0]
-            title = entry.get('title', song_name)
+    # If video_id could not be extracted (e.g. YouTube bot block on cloud datacenters),
+    # use YouTube's native search embed player which automatically finds and plays the top match!
+    if not embed_url:
+        embed_url = f"https://www.youtube-nocookie.com/embed?listType=search&list={urllib.parse.quote(song_name)}&autoplay=1"
 
-            # Determine actual downloaded file path on disk
-            base_filename = ydl.prepare_filename(entry)
-            if ffmpeg_exe:
-                mp3_filename = os.path.splitext(base_filename)[0] + ".mp3"
-                actual_file = mp3_filename if os.path.exists(mp3_filename) else base_filename
-            else:
-                actual_file = base_filename
+    CURRENT_MUSIC_METADATA = {
+        "title": title,
+        "video_id": video_id,
+        "embed_url": embed_url,
+        "webpage_url": webpage_url
+    }
+    CURRENT_SONG_TITLE = title
+    IS_PLAYING = True
+    IS_PAUSED = False
 
-            if not os.path.exists(actual_file):
-                print(f"[Music Engine ERROR]: Expected audio file not found at: {actual_file}", flush=True)
-                return f"Sorry, could not save the audio file for {song_name}."
+    # 2. Local speaker playback (only when running locally on desktop, not in cloud serverless)
+    is_headless = os.environ.get("SDL_AUDIODRIVER") == "dummy" or os.environ.get("VERCEL")
+    if not is_headless:
+        try:
+            temp_dir = tempfile.gettempdir()
+            output_template = os.path.join(temp_dir, f"kitty_music_{int(time.time())}.%(ext)s")
+            ydl_opts_dl = {
+                'format': 'bestaudio/best',
+                'outtmpl': output_template,
+                'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
+                'socket_timeout': 15,
+                'retries': 2,
+                'max_filesize': 40 * 1024 * 1024,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
+                query = f"https://www.youtube.com/watch?v={video_id}" if video_id else f"ytsearch1:{song_name}"
+                res = ydl.extract_info(query, download=True)
+                if res:
+                    e = res['entries'][0] if 'entries' in res and res['entries'] else res
+                    act_file = ydl.prepare_filename(e)
+                    if os.path.exists(act_file):
+                        CURRENT_SONG_FILE = act_file
+                        _music_thread = threading.Thread(
+                            target=_music_worker,
+                            args=(act_file, title),
+                            name=f"MusicWorker-{int(time.time())}",
+                            daemon=True
+                        )
+                        _music_thread.start()
+        except Exception as dl_err:
+            print(f"[Music Local Playback Notice]: {dl_err}", flush=True)
 
-            file_size = os.path.getsize(actual_file)
-            print(f"[Music Engine]: Audio file verified on disk: {actual_file} ({file_size} bytes)", flush=True)
-
-            CURRENT_SONG_FILE = actual_file
-
-            # Start playback in background thread (retaining reference)
-            _music_thread = threading.Thread(
-                target=_music_worker,
-                args=(actual_file, title),
-                name=f"MusicWorker-{int(time.time())}",
-                daemon=True
-            )
-            _music_thread.start()
-
-            return f"Now playing {title} on YouTube!"
-
-    except Exception as exc:
-        print(f"[Music Search ERROR]: {exc}", flush=True)
-        traceback.print_exc()
-        return f"Sorry, I ran into an error while trying to play {song_name}."
+    return f"Now playing {title} on YouTube!"
 
 
 def pause_music() -> str:

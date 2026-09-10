@@ -800,6 +800,10 @@
 
             let musicHtml = '';
             if (meta && meta.is_music && meta.music) {
+                const trackTitle = escapeHtml(meta.music.title || 'YouTube Music Track');
+                const embedUrl = meta.music.embed_url;
+                const ytUrl = meta.music.webpage_url || `https://www.youtube.com/results?search_query=${encodeURIComponent(trackTitle)}`;
+
                 musicHtml = `
                     <div class="music-player-card">
                         <div class="music-card-header">
@@ -810,14 +814,27 @@
                                 <span class="eq-bar"></span>
                             </div>
                             <div class="music-card-info">
-                                <div class="music-track-title">${escapeHtml(meta.music.title)}</div>
-                                <div class="music-track-sub">YouTube Audio Stream</div>
+                                <div class="music-track-title">${trackTitle}</div>
+                                <div class="music-track-sub">YouTube Music Player</div>
                             </div>
                         </div>
+                        ${embedUrl ? `
+                        <div class="music-embed-container" style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:12px;margin:12px 0;">
+                            <iframe 
+                                style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:12px;"
+                                src="${embedUrl}" 
+                                title="${trackTitle}"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                allowfullscreen
+                            ></iframe>
+                        </div>
+                        ` : `
                         <audio controls autoplay class="kitty-audio-player" src="${meta.music.stream_url}"></audio>
-                        <div class="music-card-actions">
-                            <button type="button" class="card-btn-pause" onclick="window.toggleKittyMusic()">⏸️ Pause / Resume</button>
-                            <button type="button" class="card-btn-stop" onclick="window.stopKittyMusic()">⏹️ Stop Music</button>
+                        `}
+                        <div class="music-card-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                            <a href="${ytUrl}" target="_blank" rel="noopener noreferrer" class="card-btn-yt" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#e60023;color:#ffffff;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;box-shadow:0 4px 12px rgba(230,0,35,0.3);">
+                                <span>▶️ Open in YouTube</span>
+                            </a>
                         </div>
                     </div>
                 `;
