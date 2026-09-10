@@ -226,28 +226,84 @@ def voice():
     output_wav = os.path.join(temp_dir, f"browser_mic_{timestamp}.wav")
 
     try:
-        audio_file.save(input_path)
+        raw_bytes = audio_file.read()
+        if len(raw_bytes) < 100:
+            return jsonify({
+                "reply": "I couldn't hear any words. Tap the microphone 🎙️ and speak clearly, or type your question below!",
+                "transcript": "",
+                "is_feature": False
+            }), 200
 
-        # Convert to 16kHz mono PCM wav using ffmpeg
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        cmd = [
-            ffmpeg_exe, "-y", "-i", input_path,
-            "-ar", "16000", "-ac", "1", output_wav
-        ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        with open(input_path, "wb") as f:
+            f.write(raw_bytes)
 
-        # Transcribe with speech_recognition
-        import speech_recognition as sr
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(output_wav) as source:
-            audio_data = recognizer.record(source)
-            user_text = recognizer.recognize_google(audio_data, language=lang).strip()
+        is_wav = len(raw_bytes) > 12 and raw_bytes[:4] == b"RIFF" and raw_bytes[8:12] == b"WAVE"
+
+        if is_wav:
+            output_wav = input_path
+        else:
+            # Try to convert webm/ogg to wav using ffmpeg if available
+            try:
+                import imageio_ffmpeg
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                cmd = [
+                    ffmpeg_exe, "-y", "-i", input_path,
+                    "-ar", "16000", "-ac", "1", output_wav
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            except Exception as conv_err:
+                print(f"[Web /voice conversion notice]: {conv_err}", flush=True)
+
+        user_text = ""
+
+        # Step 1: Transcribe with speech_recognition if WAV is available
+        if os.path.exists(output_wav):
+            try:
+                import speech_recognition as sr
+                recognizer = sr.Recognizer()
+                with sr.AudioFile(output_wav) as source:
+                    audio_data = recognizer.record(source)
+                    user_text = recognizer.recognize_google(audio_data, language=lang).strip()
+            except Exception as sr_err:
+                print(f"[Web /voice speech_recognition notice]: {sr_err}", flush=True)
+
+        # Step 2: Fallback to Gemini multimodal audio transcription if needed
+        if not user_text and raw_bytes:
+            try:
+                import google.generativeai as genai
+                from config.settings import GEMINI_API_KEY
+                if GEMINI_API_KEY:
+                    genai.configure(api_key=GEMINI_API_KEY)
+                    for model_name in ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest"]:
+                        try:
+                            g_model = genai.GenerativeModel(model_name)
+                            mime = "audio/wav" if is_wav else "audio/webm"
+                            prompt = (
+                                f"Listen to this audio spoken in {'Urdu' if 'ur' in lang.lower() else 'English'}. "
+                                "Transcribe the spoken words accurately. If silent or no words spoken, reply with: [SILENCE]. "
+                                "Return ONLY the transcription text, nothing else."
+                            )
+                            g_res = g_model.generate_content([
+                                {"mime_type": mime, "data": raw_bytes},
+                                prompt
+                            ])
+                            txt = (g_res.text or "").strip()
+                            if txt and "[silence]" not in txt.lower():
+                                user_text = txt
+                                break
+                        except Exception:
+                            continue
+            except Exception as gemini_err:
+                print(f"[Web /voice gemini transcribe error]: {gemini_err}", flush=True)
 
         print(f"\n[Web /voice] Transcribed Audio ({lang}): '{user_text}'", flush=True)
 
         if not user_text:
-            return jsonify({"reply": "I couldn't hear any words clearly. Please try speaking again!", "transcript": ""})
+            return jsonify({
+                "reply": "I couldn't hear any words. Tap the microphone 🎙️ and speak clearly, or type your question below!",
+                "transcript": "",
+                "is_feature": False
+            }), 200
 
         # Process through Urdu pipeline if Urdu text
         if is_urdu_text(user_text):
@@ -312,7 +368,7 @@ def voice():
         print(f"[Web /voice Notice]: {exc}", flush=True)
         return jsonify({
             "error": str(exc),
-            "reply": "Sorry, I had trouble understanding the audio. Please speak clearly or type your question!",
+            "reply": "I couldn't hear any words clearly. Tap the microphone 🎙️ and speak, or type your question below!",
             "transcript": ""
         }), 200
 

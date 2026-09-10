@@ -177,9 +177,15 @@
     if (landingVoiceBtn) {
         landingVoiceBtn.addEventListener('click', function() {
             openChatView();
-            setTimeout(() => {
-                startRecording();
-            }, 300);
+            if (micStatusBanner && micStatusText) {
+                micStatusBanner.classList.remove('mic-banner-hidden');
+                micStatusText.textContent = 'Tap the microphone 🎙️ below to start speaking!';
+                setTimeout(() => {
+                    if (micStatusBanner && !isRecording) {
+                        micStatusBanner.classList.add('mic-banner-hidden');
+                    }
+                }, 4000);
+            }
         });
     }
 
@@ -260,7 +266,55 @@
         });
     }
 
-    // --- Dual-Engine Voice Recording (SpeechRecognition + MediaRecorder Fallback) ---
+    // --- Dual-Engine Voice Recording (SpeechRecognition + MediaRecorder / WebAudio Fallback) ---
+    let audioContext = null;
+    let audioProcessor = null;
+    let pcmSamples = [];
+    let recordStartTime = 0;
+
+    function encodeWavBlob(samples, sampleRate) {
+        let totalSamples = 0;
+        for (let i = 0; i < samples.length; i++) {
+            totalSamples += samples[i].length;
+        }
+        const flat = new Float32Array(totalSamples);
+        let offset = 0;
+        for (let i = 0; i < samples.length; i++) {
+            flat.set(samples[i], offset);
+            offset += samples[i].length;
+        }
+
+        const buffer = new ArrayBuffer(44 + flat.length * 2);
+        const view = new DataView(buffer);
+
+        function writeStr(view, off, str) {
+            for (let i = 0; i < str.length; i++) {
+                view.setUint8(off + i, str.charCodeAt(i));
+            }
+        }
+
+        writeStr(view, 0, 'RIFF');
+        view.setUint32(4, 36 + flat.length * 2, true);
+        writeStr(view, 8, 'WAVE');
+        writeStr(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); // PCM format
+        view.setUint16(22, 1, true); // Mono 1 channel
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeStr(view, 36, 'data');
+        view.setUint32(40, flat.length * 2, true);
+
+        let dataOffset = 44;
+        for (let i = 0; i < flat.length; i++, dataOffset += 2) {
+            let s = Math.max(-1, Math.min(1, flat[i]));
+            view.setInt16(dataOffset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+        return new Blob([buffer], { type: 'audio/wav' });
+    }
+
     function stopRecording() {
         isRecording = false;
         if (micBtn) {
@@ -269,6 +323,14 @@
         }
         if (micStatusBanner) {
             micStatusBanner.classList.add('mic-banner-hidden');
+        }
+        if (audioProcessor) {
+            try { audioProcessor.disconnect(); } catch (e) {}
+            audioProcessor = null;
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+            try { audioContext.close(); } catch (e) {}
+            audioContext = null;
         }
         if (recognition) {
             try { 
@@ -396,7 +458,7 @@
         }
     }
 
-    // Engine 2: HTML5 MediaRecorder + Server /voice Route (Universal Fallback)
+    // Engine 2: Direct 16kHz PCM WAV AudioContext + MediaRecorder Fallback + Silence Gate
     async function startMediaRecorderEngine() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             const noMediaMsg = 'Your browser does not allow microphone recording. Please use Chrome, Edge, or Firefox.';
@@ -407,7 +469,28 @@
         try {
             console.log('[Hello Kitty Client] Requesting microphone stream via getUserMedia...');
             mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recordStartTime = Date.now();
+            pcmSamples = [];
             audioChunks = [];
+
+            // Setup Web Audio API PCM capture (16kHz Mono)
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) {
+                    audioContext = new AudioCtx({ sampleRate: 16000 });
+                    const srcNode = audioContext.createMediaStreamSource(mediaStream);
+                    audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                    audioProcessor.onaudioprocess = function(e) {
+                        if (!isRecording) return;
+                        const chData = e.inputBuffer.getChannelData(0);
+                        pcmSamples.push(new Float32Array(chData));
+                    };
+                    srcNode.connect(audioProcessor);
+                    audioProcessor.connect(audioContext.destination);
+                }
+            } catch (acErr) {
+                console.warn('[Hello Kitty Client] AudioContext initialization failed, using standard MediaRecorder:', acErr);
+            }
 
             const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
             mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
@@ -419,18 +502,56 @@
             };
 
             mediaRecorder.onstop = async function() {
-                console.log('[Hello Kitty Client] MediaRecorder stopped. Uploading audio to /voice...');
+                console.log('[Hello Kitty Client] Audio recording stopped. Processing...');
                 if (micStatusText) micStatusText.textContent = 'Processing your speech...';
                 if (micBtn) micBtn.classList.remove('recording');
 
-                if (audioChunks.length === 0) {
+                const durationMs = Date.now() - recordStartTime;
+                if (durationMs < 800) {
+                    console.log('[Hello Kitty Client] Recording too short (', durationMs, 'ms), ignoring quick tap.');
                     stopRecording();
                     return;
                 }
 
-                const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                // Check for silence using RMS
+                let sumSquares = 0;
+                let sampleCount = 0;
+                for (let i = 0; i < pcmSamples.length; i++) {
+                    const chunk = pcmSamples[i];
+                    for (let j = 0; j < chunk.length; j += 8) {
+                        sumSquares += chunk[j] * chunk[j];
+                        sampleCount++;
+                    }
+                }
+                const rms = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
+                console.log('[Hello Kitty Client] Recording duration:', durationMs, 'ms, RMS volume:', rms);
+
+                if (pcmSamples.length > 0 && rms < 0.003) {
+                    console.log('[Hello Kitty Client] Silence detected, skipping upload.');
+                    stopRecording();
+                    if (micStatusText) micStatusText.textContent = "Didn't hear you speak. Tap the mic and try again!";
+                    if (micStatusBanner) micStatusBanner.classList.remove('mic-banner-hidden');
+                    setTimeout(() => { if (micStatusBanner && !isRecording) micStatusBanner.classList.add('mic-banner-hidden'); }, 3000);
+                    return;
+                }
+
+                let audioBlob;
+                let filename = 'voice_input.webm';
+
+                if (pcmSamples.length > 0) {
+                    audioBlob = encodeWavBlob(pcmSamples, 16000);
+                    filename = 'voice_input.wav';
+                    console.log('[Hello Kitty Client] Generated WAV blob size:', audioBlob.size, 'bytes');
+                } else if (audioChunks.length > 0) {
+                    audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                    filename = 'voice_input.webm';
+                } else {
+                    stopRecording();
+                    return;
+                }
+
                 const formData = new FormData();
-                formData.append('audio', audioBlob, 'voice_input.webm');
+                formData.append('audio', audioBlob, filename);
                 formData.append('lang', currentVoiceLang);
 
                 showTypingIndicator();
@@ -466,7 +587,7 @@
             if (micBtn) micBtn.classList.add('recording');
             if (micStatusBanner) micStatusBanner.classList.remove('mic-banner-hidden');
             if (micStatusText) {
-                micStatusText.textContent = `Recording (${currentVoiceLang === 'ur-PK' ? 'اردو' : 'English'})... Click mic when done speaking!`;
+                micStatusText.textContent = `Recording (${currentVoiceLang === 'ur-PK' ? 'اردو' : 'English'})... Speak now!`;
             }
 
         } catch (mediaErr) {
